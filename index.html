@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>憤怒 - 3D Shooting Game</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Arial', sans-serif;
+            user-select: none;
+            touch-action: none;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #title-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, #660000 0%, #000 80%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            pointer-events: auto;
+        }
+        #title-logo {
+            font-size: clamp(60px, 15vw, 120px);
+            font-weight: bold;
+            color: #ff0000;
+            text-shadow: 0 0 20px #fff, 0 0 40px #ff8c00, 0 0 60px #ff0000;
+            margin-bottom: 40px;
+        }
+        #start-button {
+            padding: 20px 60px;
+            font-size: 28px;
+            background: linear-gradient(#ff4500, #800000);
+            color: white;
+            border: 2px solid #fff;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #ff0000;
+            font-size: 24px;
+            font-weight: bold;
+            display: none;
+        }
+        #controls {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            display: none;
+            justify-content: space-between;
+            padding: 0 50px;
+            box-sizing: border-box;
+            pointer-events: none;
+        }
+        .dpad {
+            display: grid;
+            grid-template-columns: repeat(3, 60px);
+            grid-template-rows: repeat(3, 60px);
+            gap: 5px;
+            pointer-events: auto;
+        }
+        .btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 0, 0, 0.5);
+            border-radius: 10px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 24px;
+        }
+        #btn-up { grid-column: 2; grid-row: 1; }
+        #btn-down { grid-column: 2; grid-row: 3; }
+        #btn-left { grid-column: 1; grid-row: 2; }
+        #btn-right { grid-column: 3; grid-row: 2; }
+        #shot-button {
+            width: 120px;
+            height: 120px;
+            background: radial-gradient(circle, #ff4500, #ff0000);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            pointer-events: auto;
+            border: 4px solid #fff;
+        }
+        #game-over {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 200;
+            color: #ff0000;
+            pointer-events: auto;
+        }
+        .ui-btn {
+            padding: 10px 40px;
+            font-size: 24px;
+            background: #ff0000;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div id="title-screen">
+        <div id="title-logo">憤怒</div>
+        <button id="start-button">修羅の道へ</button>
+    </div>
+    <div id="hud">撃破数: <span id="score">0</span></div>
+    <div id="game-over">
+        <h2>やれやれだぜ・・・</h2>
+        <p>スコア: <span id="final-score">0</span></p>
+        <button id="restart-button" class="ui-btn">再研修</button>
+    </div>
+    <div id="controls">
+        <div class="dpad">
+            <div id="btn-up" class="btn">▲</div>
+            <div id="btn-left" class="btn">◀</div>
+            <div id="btn-right" class="btn">▶</div>
+            <div id="btn-down" class="btn">▼</div>
+        </div>
+        <div id="shot-button">SHOT</div>
+    </div>
+</div>
+
+<script>
+    let score = 0;
+    let isGameOver = false;
+    let isGameRunning = false;
+    let lastBossWallSpawn = 0;
+    let gameTime = 0;
+    let scene, camera, renderer, clock, ground, player;
+    let enemies = [], shots = [], particles = [];
+    const keys = { up: false, down: false, left: false, right: false, space: false };
+
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050000);
+        scene.fog = new THREE.FogExp2(0x1a0000, 0.005);
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+        camera.position.set(0, 3, 15);
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+        clock = new THREE.Clock();
+        
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+        const directionalLight = new THREE.DirectionalLight(0xff4400, 1.2);
+        directionalLight.position.set(0, 10, 5);
+        scene.add(directionalLight);
+        
+        const gridHelper = new THREE.GridHelper(2000, 100, 0xff0000, 0x440000);
+        ground = new THREE.Group();
+        ground.add(gridHelper);
+        scene.add(ground);
+        
+        player = createStickman();
+        scene.add(player);
+        player.position.set(0, 1, 0);
+        
+        window.addEventListener('resize', onWindowResize, false);
+        initInput();
+    }
+
+    function createStickman() {
+        const group = new THREE.Group();
+        const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), material);
+        head.position.y = 1.4;
+        group.add(head);
+        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.6), material);
+        body.position.y = 1.0;
+        group.add(body);
+        const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.5), material);
+        armL.rotation.z = Math.PI / 3; armL.position.set(-0.2, 1.1, 0); group.add(armL);
+        const armR = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.5), material);
+        armR.rotation.z = -Math.PI / 3; armR.position.set(0.2, 1.1, 0); group.add(armR);
+        const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.6), material);
+        legL.rotation.z = 0.2; legL.position.set(-0.15, 0.6, 0); group.add(legL);
+        const legR = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.6), material);
+        legR.rotation.z = -0.2; legR.position.set(0.15, 0.6, 0); group.add(legR);
+        return group;
+    }
+
+    function createTextTexture(textOrArray, textColor = '#ffffff', fontSize = 64) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = `bold ${fontSize}px "Meiryo", sans-serif`;
+        const lines = Array.isArray(textOrArray) ? textOrArray : [textOrArray];
+        const lineHeight = fontSize * 1.1;
+        const startY = 256 - ((lines.length - 1) * lineHeight) / 2;
+        lines.forEach((line, index) => {
+            ctx.fillStyle = textColor;
+            ctx.fillText(line, 256, startY + index * lineHeight);
+        });
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    function createExplosion(pos, color = 0xff4400, count = 20) {
+        for (let i = 0; i < count; i++) {
+            const p = new THREE.Mesh(
+                new THREE.BoxGeometry(0.4, 0.4, 0.4),
+                new THREE.MeshBasicMaterial({ color: color, transparent: true })
+            );
+            p.position.copy(pos);
+            const angle = Math.random() * Math.PI * 2;
+            const speed = Math.random() * 0.8;
+            p.userData = {
+                vel: new THREE.Vector3(
+                    Math.cos(angle) * speed,
+                    (Math.random() - 0.5) * speed,
+                    Math.sin(angle) * speed
+                ),
+                life: 1.0 + Math.random()
+            };
+            scene.add(p);
+            particles.push(p);
+        }
+    }
+
+    function spawnEnemy(isGiant = false, xPos = null, yPos = null) {
+        const size = isGiant ? 8.0 : 4.0; 
+        const geometry = new THREE.SphereGeometry(size, 16, 16);
+        const sphereMat = new THREE.MeshPhongMaterial({ color: 0x000000 });
+        const sphere = new THREE.Mesh(geometry, sphereMat);
+
+        const edgeMat = new THREE.MeshBasicMaterial({ 
+            color: isGiant ? 0xff0000 : 0x9900ff,
+            side: THREE.BackSide,
+            transparent: true,
+            opacity: 0.8
+        });
+        const edgeSphere = new THREE.Mesh(new THREE.SphereGeometry(size * 1.05, 16, 16), edgeMat);
+
+        let textLines, fontSize, moveType;
+        if (isGiant) {
+            textLines = ['ベテラン', '研修'];
+            fontSize = 90;
+            moveType = 0; 
+        } else {
+            const randType = Math.random();
+            if (randType < 0.5) {
+                textLines = ['Plant'];
+                fontSize = 90;
+            } else {
+                textLines = ['授業力向上', 'プログラム'];
+                fontSize = 60;
+            }
+            moveType = Math.random() < 0.7 ? 1 : 2;
+        }
+
+        const textTexture = createTextTexture(textLines, '#ffffff', fontSize);
+        const textMaterial = new THREE.SpriteMaterial({ map: textTexture });
+        const textSprite = new THREE.Sprite(textMaterial);
+        textSprite.scale.set(size * 3.8, size * 3.8, 1);
+        textSprite.position.z = size * 1.01;
+
+        const group = new THREE.Group();
+        group.add(sphere);
+        group.add(edgeSphere);
+        group.add(textSprite);
+        
+        const finalX = xPos !== null ? xPos : (Math.random() - 0.5) * 80;
+        const finalY = yPos !== null ? yPos : (Math.random() * 20) + size;
+        group.position.set(finalX, finalY, -600);
+        group.userData = { radius: size, isGiant: isGiant, moveType: moveType, seed: Math.random() * 10 };
+        
+        scene.add(group);
+        enemies.push(group);
+    }
+
+    function spawnBossWall() {
+        const rows = 2;
+        const cols = 8;
+        const spacingX = 16;
+        const spacingY = 16;
+        for(let r = 0; r < rows; r++) {
+            for(let c = 0; c < cols; c++) {
+                spawnEnemy(true, (c - cols/2) * spacingX, (r * spacingY) + 8);
+            }
+        }
+    }
+
+    function update() {
+        const delta = clock.getDelta();
+
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.position.add(p.userData.vel);
+            p.userData.life -= delta;
+            p.material.opacity = Math.max(0, p.userData.life);
+            if (p.userData.life <= 0) {
+                scene.remove(p);
+                particles.splice(i, 1);
+            }
+        }
+
+        if (!isGameRunning || isGameOver) {
+            ground.children[0].position.z += 5 * delta;
+            if (ground.children[0].position.z > 20) ground.children[0].position.z = 0;
+            return;
+        }
+
+        gameTime += delta;
+        ground.children[0].position.z += 60 * delta;
+        if (ground.children[0].position.z > 20) ground.children[0].position.z = 0;
+
+        const pSpeed = 40 * delta;
+        if (keys.left) player.position.x -= pSpeed;
+        if (keys.right) player.position.x += pSpeed;
+        if (keys.up) player.position.y += pSpeed;
+        if (keys.down) player.position.y -= pSpeed;
+        player.position.x = Math.max(-45, Math.min(45, player.position.x));
+        player.position.y = Math.max(0.5, Math.min(35, player.position.y));
+
+        player.rotation.z = THREE.MathUtils.lerp(player.rotation.z, (keys.left ? 0.4 : (keys.right ? -0.4 : 0)), 0.1);
+
+        if (keys.space && gameTime % 0.1 < delta) {
+            const shot = new THREE.Sprite(new THREE.SpriteMaterial({ map: createTextTexture('オラ', '#ffff00', 160) }));
+            shot.scale.set(4, 4, 1); shot.position.copy(player.position);
+            scene.add(shot); shots.push(shot);
+        }
+
+        for (let i = shots.length - 1; i >= 0; i--) {
+            shots[i].position.z -= 200 * delta;
+            if (shots[i].position.z < -600) { scene.remove(shots[i]); shots.splice(i, 1); }
+        }
+
+        // ボスの壁の間隔を元の「4.0秒」に復元
+        if (gameTime - lastBossWallSpawn > 4.0) {
+            spawnBossWall();
+            lastBossWallSpawn = gameTime;
+        }
+        // ザコの出現率のみ下げる（0.12）
+        if (Math.random() < 0.12) spawnEnemy(false);
+
+        for (let i = enemies.length - 1; i >= 0; i--) {
+            const e = enemies[i];
+            const d = e.userData;
+            e.position.z += (d.isGiant ? 60 : 90) * delta;
+
+            if (!d.isGiant) {
+                if (d.moveType === 1) {
+                    e.position.x += (player.position.x - e.position.x) * 0.035;
+                    e.position.y += (player.position.y - e.position.y) * 0.035;
+                } else if (d.moveType === 2) {
+                    e.position.x += Math.sin(gameTime * 5 + d.seed) * 0.6;
+                }
+            }
+
+            const dist = e.position.distanceTo(player.position);
+            if (dist < d.radius * 0.3) endGame();
+            if (e.position.z > 30) { scene.remove(e); enemies.splice(i, 1); }
+        }
+
+        for (let i = shots.length - 1; i >= 0; i--) {
+            const s = shots[i];
+            for (let j = enemies.length - 1; j >= 0; j--) {
+                const e = enemies[j];
+                if (s && e && s.position.distanceTo(e.position) < e.userData.radius + 2) {
+                    if (!e.userData.isGiant) {
+                        createExplosion(e.position, 0xffaa00, 25);
+                        score += 20; document.getElementById('score').innerText = score;
+                        scene.remove(e); enemies.splice(j, 1);
+                    } else {
+                        createExplosion(s.position, 0xaaaaaa, 5);
+                    }
+                    scene.remove(s); shots.splice(i, 1);
+                    break;
+                }
+            }
+        }
+    }
+
+    function endGame() {
+        if (isGameOver) return;
+        isGameOver = true; isGameRunning = false;
+        document.getElementById('controls').style.display = 'none';
+        createExplosion(player.position, 0xffffff, 100);
+        player.visible = false;
+        setTimeout(() => {
+            document.getElementById('game-over').style.display = 'flex';
+            document.getElementById('final-score').innerText = score;
+        }, 2000);
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function initInput() {
+        const setKey = (code, val) => {
+            const k = code.replace('Arrow','').toLowerCase();
+            if (k in keys) keys[k] = val;
+            if (code === 'Space') keys.space = val;
+        };
+        window.addEventListener('keydown', e => setKey(e.code, true));
+        window.addEventListener('keyup', e => setKey(e.code, false));
+        const btnMap = { 'btn-up': 'up', 'btn-down': 'down', 'btn-left': 'left', 'btn-right': 'right' };
+        Object.entries(btnMap).forEach(([id, k]) => {
+            const b = document.getElementById(id);
+            b.addEventListener('touchstart', (e) => { e.preventDefault(); keys[k] = true; });
+            b.addEventListener('touchend', (e) => { e.preventDefault(); keys[k] = false; });
+            b.addEventListener('mousedown', () => keys[k] = true);
+            b.addEventListener('mouseup', () => keys[k] = false);
+        });
+        const sb = document.getElementById('shot-button');
+        sb.addEventListener('touchstart', (e) => { e.preventDefault(); keys.space = true; });
+        sb.addEventListener('touchend', (e) => { e.preventDefault(); keys.space = false; });
+        sb.addEventListener('mousedown', () => keys.space = true);
+        sb.addEventListener('mouseup', () => keys.space = false);
+    }
+
+    function animate() { requestAnimationFrame(animate); update(); renderer.render(scene, camera); }
+
+    window.onload = () => {
+        init(); animate();
+        const start = () => {
+            score = 0; gameTime = 0; lastBossWallSpawn = -2;
+            isGameOver = false; isGameRunning = true;
+            player.visible = true; player.position.set(0, 1, 0);
+            enemies.forEach(e => scene.remove(e)); enemies = [];
+            particles.forEach(p => scene.remove(p)); particles = [];
+            document.getElementById('title-screen').style.display = 'none';
+            document.getElementById('game-over').style.display = 'none';
+            document.getElementById('hud').style.display = 'block';
+            document.getElementById('controls').style.display = 'flex';
+        };
+        document.getElementById('start-button').onclick = start;
+        document.getElementById('restart-button').onclick = start;
+    };
+</script>
+</body>
+</html>
